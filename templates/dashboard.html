@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — CodeSync{% endblock %}
+{% block extra_css %}
+<style>
+  .dash-wrap { max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem; }
+  .dash-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2.5rem; flex-wrap: gap; gap: 1rem; }
+  .dash-title { font-size: 1.5rem; font-weight: 800; letter-spacing: -1px; }
+  .dash-title span { color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+  .section-label { font-family: 'JetBrains Mono', monospace; font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 1rem; }
+  .rooms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 2.5rem; }
+  .room-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.4rem;
+    transition: border-color .2s, transform .2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .room-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    opacity: 0;
+    transition: opacity .2s;
+  }
+  .room-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .room-card:hover::before { opacity: 1; }
+  .room-name { font-size: 1rem; font-weight: 600; margin-bottom: .5rem; }
+  .room-meta { display: flex; gap: .5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  .room-code-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .7rem;
+    background: rgba(255,255,255,.05);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: .15rem .45rem;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .room-actions { display: flex; gap: .5rem; }
+  .btn-enter { flex: 1; text-align: center; padding: .45rem; background: rgba(0,229,255,.1); border: 1px solid rgba(0,229,255,.3); color: var(--accent); border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: .78rem; text-decoration: none; transition: all .2s; }
+  .btn-enter:hover { background: var(--accent); color: var(--bg); }
+  .btn-del { padding: .45rem .7rem; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); color: var(--danger); border-radius: 4px; font-size: .78rem; cursor: pointer; transition: all .2s; }
+  .btn-del:hover { background: var(--danger); color: #fff; }
+  .empty-state { text-align: center; padding: 3rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: .85rem; border: 1px dashed var(--border); border-radius: 8px; }
+  .modal-dark { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); }
+  .modal-header-dark { border-bottom: 1px solid var(--border); padding: 1.2rem 1.5rem; }
+  .modal-body-dark { padding: 1.5rem; }
+  .modal-footer-dark { border-top: 1px solid var(--border); padding: 1rem 1.5rem; display: flex; justify-content: flex-end; gap: .75rem; }
+  select.form-control-dark option { background: var(--surface); }
+  .members-badge { font-family:'JetBrains Mono',monospace; font-size:.7rem; color:var(--accent3); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="dash-wrap">
+  <div class="dash-header">
+    <div>
+      <div class="dash-title">Welcome back, <span>{{ session.username }}</span></div>
+      <div style="color:var(--muted);font-size:.85rem;margin-top:.25rem">Manage your rooms below</div>
+    </div>
+    <div class="d-flex gap-2">
+      <button onclick="document.getElementById('joinModal').style.display='flex'" class="btn-glow">
+        <i class="fa fa-sign-in-alt me-1"></i> Join Room
+      </button>
+      <button onclick="document.getElementById('createModal').style.display='flex'" class="btn-solid">
+        <i class="fa fa-plus me-1"></i> New Room
+      </button>
+    </div>
+  </div>
+
+  <!-- My Rooms -->
+  <div class="section-label">// my rooms</div>
+  {% if my_rooms %}
+  <div class="rooms-grid">
+    {% for room in my_rooms %}
+    <div class="room-card">
+      <div class="room-name">{{ room.room_name }}</div>
+      <div class="room-meta">
+        <span class="badge-lang">{{ room.language }}</span>
+        <span class="room-code-chip" title="Click to copy" onclick="navigator.clipboard.writeText('{{ room.room_code }}');this.textContent='copied!';setTimeout(()=>this.textContent='{{ room.room_code }}',1500)">{{ room.room_code }}</span>
+        <span class="members-badge"><i class="fa fa-users me-1"></i>{{ room.member_count }}</span>
+      </div>
+      <div class="room-actions">
+        <a href="{{ url_for('editor', room_code=room.room_code) }}" class="btn-enter">Open Editor →</a>
+        <form method="POST" action="{{ url_for('delete_room', room_code=room.room_code) }}" style="margin:0" onsubmit="return confirm('Delete this room?')">
+          <button type="submit" class="btn-del"><i class="fa fa-trash"></i></button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state mb-4">No rooms yet. Create one to start collaborating!</div>
+  {% endif %}
+
+  <!-- Joined Rooms -->
+  {% if joined_rooms %}
+  <div class="section-label">// joined rooms</div>
+  <div class="rooms-grid">
+    {% for room in joined_rooms %}
+    <div class="room-card">
+      <div class="room-name">{{ room.room_name }}</div>
+      <div class="room-meta">
+        <span class="badge-lang">{{ room.language }}</span>
+        <span style="font-size:.75rem;color:var(--muted);font-family:'JetBrains Mono',monospace">by {{ room.owner_name }}</span>
+        <span class="members-badge"><i class="fa fa-users me-1"></i>{{ room.member_count }}</span>
+      </div>
+      <a href="{{ url_for('editor', room_code=room.room_code) }}" class="btn-enter d-block text-center">Open Editor →</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- Create Modal -->
+<div id="createModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center">
+  <div class="modal-dark" style="width:100%;max-width:420px;margin:1rem">
+    <div class="modal-header-dark d-flex justify-content-between align-items-center">
+      <span style="font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent)">Create Room</span>
+      <button onclick="document.getElementById('createModal').style.display='none'" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('create_room') }}">
+      <div class="modal-body-dark">
+        <div class="form-group mb-3">
+          <label class="label-text">Room Name</label>
+          <input type="text" name="room_name" class="form-control-dark" placeholder="My Awesome Project" required/>
+        </div>
+        <div class="form-group">
+          <label class="label-text">Language</label>
+          <select name="language" class="form-control-dark">
+            <option value="python">Python</option>
+            <option value="javascript">JavaScript</option>
+            <option value="java">Java</option>
+            <option value="cpp">C++</option>
+            <option value="html">HTML</option>
+            <option value="css">CSS</option>
+            <option value="sql">SQL</option>
+            <option value="go">Go</option>
+            <option value="rust">Rust</option>
+            <option value="typescript">TypeScript</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer-dark">
+        <button type="button" onclick="document.getElementById('createModal').style.display='none'" class="btn-glow">Cancel</button>
+        <button type="submit" class="btn-solid">Create →</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Join Modal -->
+<div id="joinModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center">
+  <div class="modal-dark" style="width:100%;max-width:380px;margin:1rem">
+    <div class="modal-header-dark d-flex justify-content-between align-items-center">
+      <span style="font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent2)">Join a Room</span>
+      <button onclick="document.getElementById('joinModal').style.display='none'" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('join_room_page') }}">
+      <div class="modal-body-dark">
+        <label class="label-text">Room Code</label>
+        <input type="text" name="room_code" class="form-control-dark" placeholder="Paste room code here" required/>
+      </div>
+      <div class="modal-footer-dark">
+        <button type="button" onclick="document.getElementById('joinModal').style.display='none'" class="btn-glow">Cancel</button>
+        <button type="submit" class="btn-purple">Join →</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
