@@ -383,31 +383,6 @@ def download_zip(room_code):
     return send_file(buf, mimetype='application/zip', as_attachment=True,
                      download_name=f"{room['room_name']}.zip")
 
-# ─── LANGUAGE VERSION DETECTION ─────────────────────────────
-@app.route('/api/lang_versions')
-def lang_versions():
-    checks = {
-        'python':     ['python', '--version'],
-        'javascript': ['node', '--version'],
-        'java':       ['java', '--version'],
-        'cpp':        ['g++', '--version'],
-        'c':          ['gcc', '--version'],
-        'go':         ['go', 'version'],
-        'rust':       ['rustc', '--version'],
-        'typescript': ['tsc', '--version'],
-    }
-    result = {}
-    for lang, cmd in checks.items():
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            raw = (proc.stdout + proc.stderr).strip().splitlines()[0]
-            result[lang] = {'installed': True, 'version': raw}
-        except FileNotFoundError:
-            result[lang] = {'installed': False, 'version': None}
-        except Exception:
-            result[lang] = {'installed': False, 'version': None}
-    return jsonify(result)
-
 # ─── TERMINAL COMMAND RUNNER ─────────────────────────────────
 @app.route('/api/terminal', methods=['POST'])
 def terminal_run():
