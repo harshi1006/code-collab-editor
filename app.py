@@ -14,7 +14,7 @@ import secrets
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # ─── DB CONFIG ───────────────────────────────────────────────
 DB_CONFIG = {
