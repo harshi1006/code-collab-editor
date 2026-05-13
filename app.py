@@ -13,16 +13,18 @@ from datetime import datetime
 import secrets
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 # ─── DB CONFIG ───────────────────────────────────────────────
 DB_CONFIG = {
-    'host':     os.environ.get('MYSQL_HOST',     'localhost'),
-    'user':     os.environ.get('MYSQL_USER',     'root'),
-    'password': os.environ.get('MYSQL_PASSWORD', 'root'),
-    'database': os.environ.get('MYSQL_DATABASE', 'collab_editor')
+    'host':     os.environ.get('MYSQLHOST',     os.environ.get('MYSQL_HOST',     'localhost')),
+    'user':     os.environ.get('MYSQLUSER',     os.environ.get('MYSQL_USER',     'root')),
+    'password': os.environ.get('MYSQLPASSWORD', os.environ.get('MYSQL_PASSWORD', 'root')),
+    'database': os.environ.get('MYSQLDATABASE', os.environ.get('MYSQL_DATABASE', 'collab_editor')),
+    'port':     int(os.environ.get('MYSQLPORT', os.environ.get('MYSQL_PORT', 3306))),
 }
+
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 def get_db():
     return mysql.connector.connect(**DB_CONFIG)
@@ -32,14 +34,9 @@ def hash_password(password):
 
 # ─── INIT DB ─────────────────────────────────────────────────
 def init_db():
-    conn = mysql.connector.connect(
-        host=DB_CONFIG['host'],
-        user=DB_CONFIG['user'],
-        password=DB_CONFIG['password']
-    )
+    # Railway pe seedha existing DB use karo — naya DB mat banao
+    conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("CREATE DATABASE IF NOT EXISTS collab_editor")
-    cursor.execute("USE collab_editor")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -104,6 +101,7 @@ def init_db():
     conn.commit()
     cursor.close()
     conn.close()
+    print("DB initialized successfully")
 
 # ─── HELPERS ─────────────────────────────────────────────────
 DEFAULT_FILENAMES = {
@@ -250,7 +248,6 @@ def editor(room_code):
     cursor.execute("SELECT * FROM room_files WHERE room_id=%s ORDER BY created_at ASC", (room['id'],))
     files = cursor.fetchall()
 
-    # Migrate old rooms that have no files
     if not files:
         fname = DEFAULT_FILENAMES.get(room['language'], 'main.py')
         cursor.execute("INSERT INTO room_files (room_id,filename,content) VALUES (%s,%s,%s)",
@@ -259,12 +256,10 @@ def editor(room_code):
         cursor.execute("SELECT * FROM room_files WHERE room_id=%s ORDER BY created_at ASC", (room['id'],))
         files = cursor.fetchall()
 
-    # Serialize datetimes
     for f in files:
         f['created_at'] = str(f['created_at'])
         f['updated_at'] = str(f['updated_at'])
 
-    # Load chat messages — sirf tab se jab current user join kiya
     cursor.execute("""
         SELECT joined_at FROM room_members
         WHERE room_id = %s AND user_id = %s
@@ -372,7 +367,6 @@ def download_zip(room_code):
     cursor.execute("SELECT filename,content FROM room_files WHERE room_id=%s", (room['id'],))
     files = cursor.fetchall()
     cursor.close(); conn.close()
-
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for f in files:
@@ -382,8 +376,7 @@ def download_zip(room_code):
     return send_file(buf, mimetype='application/zip', as_attachment=True,
                      download_name=f"{room['room_name']}.zip")
 
-
-# ─── TERMINAL COMMAND RUNNER ─────────────────────────────────
+# ─── TERMINAL ────────────────────────────────────────────────
 @app.route('/api/terminal', methods=['POST'])
 def terminal_run():
     if 'user_id' not in session:
@@ -403,8 +396,7 @@ def terminal_run():
     except Exception as e:
         return jsonify({'output': '', 'error': str(e), 'exit_code': 1})
 
-# ─── CODE EXECUTION — Local subprocess only ──────────────────
-
+# ─── CODE EXECUTION ──────────────────────────────────────────
 LANG_CONFIG = {
     'python':     {'file_cmd': ['python', '{file}'],    'ext': '.py'},
     'javascript': {'file_cmd': ['node',   '{file}'],    'ext': '.js'},
@@ -435,102 +427,59 @@ LANG_CONFIG = {
     'ruby':       {'file_cmd': ['ruby',    '{file}'], 'ext': '.rb'},
 }
 
-
 @app.route('/api/run', methods=['POST'])
 def run_code():
     if 'user_id' not in session:
         return jsonify({'error': 'unauthorized'}), 401
-
     data     = request.json
     code     = data.get('code', '')
     language = data.get('language', 'python')
     stdin    = data.get('stdin', '')
-
     cfg = LANG_CONFIG.get(language)
     if not cfg:
-        return jsonify({
-            'output':    '',
-            'error':     f'"{language}" execution supported nahi hai abhi.',
-            'exit_code': 1
-        })
-
+        return jsonify({'output': '', 'error': f'"{language}" supported nahi hai.', 'exit_code': 1})
     tmp_dir = tempfile.mkdtemp()
     try:
         ext      = cfg['ext']
         fname    = 'Main' + ext if language == 'java' else 'code' + ext
         filepath = os.path.join(tmp_dir, fname)
         exe_path = os.path.join(tmp_dir, 'code_out')
-
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(code)
-
-        # Compiled languages — pehle compile, phir run
         if 'compile' in cfg:
             compile_cmd = [
-                c.replace('{file}', filepath)
-                 .replace('{exe}',  exe_path)
-                 .replace('{dir}',  tmp_dir)
+                c.replace('{file}', filepath).replace('{exe}', exe_path).replace('{dir}', tmp_dir)
                 for c in cfg['compile']
             ]
             comp = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=20)
             if comp.returncode != 0:
-                return jsonify({
-                    'output':    '',
-                    'error':     comp.stderr or comp.stdout or 'Compilation failed',
-                    'exit_code': comp.returncode
-                })
-            run_cmd = [
-                c.replace('{exe}', exe_path).replace('{dir}', tmp_dir)
-                for c in cfg['run']
-            ]
+                return jsonify({'output': '', 'error': comp.stderr or comp.stdout or 'Compilation failed',
+                                'exit_code': comp.returncode})
+            run_cmd = [c.replace('{exe}', exe_path).replace('{dir}', tmp_dir) for c in cfg['run']]
         else:
             run_cmd = [c.replace('{file}', filepath) for c in cfg['file_cmd']]
-
-        proc = subprocess.run(
-            run_cmd, input=stdin,
-            capture_output=True, text=True, timeout=10
-        )
-
+        proc = subprocess.run(run_cmd, input=stdin, capture_output=True, text=True, timeout=10)
         stdout_val = proc.stdout or ''
         stderr_val = proc.stderr or ''
         exit_code  = proc.returncode
-
-        # stderr mein error keywords hain lekin exit_code 0 — fix karo
         if exit_code == 0 and stderr_val:
             lower = stderr_val.lower()
             if any(kw in lower for kw in [
-                'error', 'traceback', 'exception',
-                'syntaxerror', 'nameerror', 'typeerror',
-                'valueerror', 'indexerror', 'keyerror'
+                'error', 'traceback', 'exception', 'syntaxerror',
+                'nameerror', 'typeerror', 'valueerror', 'indexerror', 'keyerror'
             ]):
                 exit_code = 1
-
-        return jsonify({
-            'output':    stdout_val,
-            'error':     stderr_val,
-            'exit_code': exit_code
-        })
-
+        return jsonify({'output': stdout_val, 'error': stderr_val, 'exit_code': exit_code})
     except subprocess.TimeoutExpired:
-        return jsonify({
-            'output':    '',
-            'error':     '⏱ Execution timed out (10s limit)',
-            'exit_code': 1
-        })
+        return jsonify({'output': '', 'error': 'Execution timed out (10s)', 'exit_code': 1})
     except FileNotFoundError as e:
-        runtime = language.capitalize()
-        return jsonify({
-            'output':    '',
-            'error':     f'{runtime} runtime not found.\nDocker mein install karo ya Dockerfile check karo.\n\nDetails: {e}',
-            'exit_code': 1
-        })
+        return jsonify({'output': '', 'error': f'{language} runtime not found.\n{e}', 'exit_code': 1})
     except Exception as e:
         return jsonify({'output': '', 'error': str(e), 'exit_code': 1})
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-
-# ─── LANG VERSIONS ────────────────────────────────────────────
+# ─── LANG VERSIONS ───────────────────────────────────────────
 @app.route('/api/lang_versions')
 def lang_versions():
     checks = {
@@ -558,7 +507,7 @@ def lang_versions():
             versions[lang] = {'installed': False, 'version': 'error', 'runtime': 'none'}
     return jsonify(versions)
 
-# ─── OLD COMPAT ROUTE ────────────────────────────────────────
+# ─── OLD COMPAT ──────────────────────────────────────────────
 @app.route('/save_code', methods=['POST'])
 def save_code():
     if 'user_id' not in session:
@@ -623,9 +572,6 @@ def on_cursor_move(data):
 @socketio.on('chat_message')
 def on_chat(data):
     now = datetime.now()
-    time_str = now.strftime('%H:%M')
-
-    # DB mein save karo
     try:
         conn = get_db(); cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT id FROM rooms WHERE room_code=%s", (data['room_code'],))
@@ -639,12 +585,10 @@ def on_chat(data):
         cursor.close(); conn.close()
     except Exception as e:
         print(f"Chat save error: {e}")
-
-    # Sabko broadcast karo
     emit('new_message', {
         'username': data['username'],
         'message':  data['message'],
-        'time':     time_str
+        'time':     now.strftime('%H:%M')
     }, room=data['room_code'])
 
 @socketio.on('disconnect')
@@ -655,7 +599,7 @@ def on_disconnect():
             emit('user_left', {'username': username, 'users': list(users.values())}, room=room)
             break
 
-# Gunicorn bhi init_db() run kare — module level pe call karo
+# ─── STARTUP ─────────────────────────────────────────────────
 try:
     init_db()
 except Exception as e:
