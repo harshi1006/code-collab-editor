@@ -24,7 +24,6 @@ DB_CONFIG = {
     'database': os.environ.get('MYSQL_DATABASE', 'collab_editor')
 }
 
-
 def get_db():
     return mysql.connector.connect(**DB_CONFIG)
 
@@ -383,6 +382,7 @@ def download_zip(room_code):
     return send_file(buf, mimetype='application/zip', as_attachment=True,
                      download_name=f"{room['room_name']}.zip")
 
+
 # ─── TERMINAL COMMAND RUNNER ─────────────────────────────────
 @app.route('/api/terminal', methods=['POST'])
 def terminal_run():
@@ -655,8 +655,13 @@ def on_disconnect():
             emit('user_left', {'username': username, 'users': list(users.values())}, room=room)
             break
 
-if __name__ == '__main__':
+# Gunicorn bhi init_db() run kare — module level pe call karo
+try:
     init_db()
+except Exception as e:
+    print(f"DB init error: {e}")
+
+if __name__ == '__main__':
     port  = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') != 'production'
     socketio.run(app, host='0.0.0.0', port=port, debug=debug, allow_unsafe_werkzeug=True)
