@@ -384,15 +384,26 @@ def terminal_run():
     data    = request.json
     command = data.get('command', '').strip()
     if not command:
-        return jsonify({'output': '', 'error': 'No command', 'exit_code': 1})
-    BLOCKED = ['rm -rf /', 'format c', 'del /f /s /q c:\\', 'shutdown', 'reboot', 'mkfs']
+        return jsonify({'output': '', 'error': 'No command provided.', 'exit_code': 1})
+
+    BLOCKED = ['rm -rf /', 'mkfs', 'dd if=', ':(){:|:&}', 'chmod -R 777 /']
     if any(b in command.lower() for b in BLOCKED):
         return jsonify({'output': '', 'error': 'Command blocked for safety.', 'exit_code': 1})
+
+    # Ensure PATH includes common runtime locations
+    env = os.environ.copy()
+    env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cargo/bin:/usr/local/go/bin:' + env.get('PATH', '')
+
     try:
-        proc = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(
+            command, shell=True,
+            capture_output=True, text=True,
+            timeout=30, env=env,
+            cwd='/tmp'  # safe working directory
+        )
         return jsonify({'output': proc.stdout, 'error': proc.stderr, 'exit_code': proc.returncode})
     except subprocess.TimeoutExpired:
-        return jsonify({'output': '', 'error': 'Command timed out (30s)', 'exit_code': 1})
+        return jsonify({'output': '', 'error': 'Command timed out (30s limit)', 'exit_code': 1})
     except Exception as e:
         return jsonify({'output': '', 'error': str(e), 'exit_code': 1})
 
