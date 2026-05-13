@@ -542,15 +542,29 @@ def on_join(data):
     join_room(room)
     if room not in active_users:
         active_users[room] = {}
+
+    # Same user pehle se join hai — purana session remove karo
+    old_sid = None
+    for sid, uname in list(active_users[room].items()):
+        if uname == username and sid != request.sid:
+            old_sid = sid
+            break
+    if old_sid:
+        del active_users[room][old_sid]
+
     active_users[room][request.sid] = username
-    emit('user_joined', {'username': username, 'users': list(active_users[room].values())}, room=room)
+    emit('user_joined', {'username': username, 'users': list(set(active_users[room].values()))}, room=room)
 
 @socketio.on('code_change')
 def on_code_change(data):
+    room = data['room_code']
+    username = data['username']
+    # Same user ke doosre devices ko bhi update bhejo lekin unka onChange fire na ho
+    # include_self=False se current tab ko nahi bhejta — baaki sab ko bhejta hai
     emit('code_update', {
-        'code': data['code'], 'username': data['username'],
+        'code': data['code'], 'username': username,
         'filename': data.get('filename', ''), 'cursor': data.get('cursor', {})
-    }, room=data['room_code'], include_self=False)
+    }, room=room, include_self=False)
 
 @socketio.on('file_created')
 def on_file_created(data):
@@ -596,7 +610,13 @@ def on_disconnect():
     for room, users in active_users.items():
         if request.sid in users:
             username = users.pop(request.sid)
-            emit('user_left', {'username': username, 'users': list(users.values())}, room=room)
+            # Agar same user ka koi aur session hai toh user_left mat bhejo
+            still_present = username in users.values()
+            if not still_present:
+                emit('user_left', {
+                    'username': username,
+                    'users': list(set(users.values()))
+                }, room=room)
             break
 
 # ─── STARTUP ─────────────────────────────────────────────────
