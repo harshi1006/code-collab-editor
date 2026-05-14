@@ -381,8 +381,11 @@ def download_zip(room_code):
 def terminal_run():
     if 'user_id' not in session:
         return jsonify({'error': 'unauthorized'}), 401
-    data    = request.json
-    command = data.get('command', '').strip()
+
+    data      = request.json
+    command   = data.get('command', '').strip()
+    room_code = data.get('room_code', '')
+
     if not command:
         return jsonify({'output': '', 'error': 'No command provided.', 'exit_code': 1})
 
@@ -390,22 +393,40 @@ def terminal_run():
     if any(b in command.lower() for b in BLOCKED):
         return jsonify({'output': '', 'error': 'Command blocked for safety.', 'exit_code': 1})
 
-    # Ensure PATH includes common runtime locations
     env = os.environ.copy()
     env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cargo/bin:/usr/local/go/bin:' + env.get('PATH', '')
 
+    # Write all room files to a temp directory so terminal commands can access them
+    work_dir = tempfile.mkdtemp(prefix='terminal_')
     try:
+        if room_code:
+            conn = get_db(); cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT id FROM rooms WHERE room_code=%s", (room_code,))
+            room = cursor.fetchone()
+            if room:
+                cursor.execute("SELECT filename, content FROM room_files WHERE room_id=%s", (room['id'],))
+                files = cursor.fetchall()
+                for f in files:
+                    fpath = os.path.join(work_dir, f['filename'])
+                    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+                    with open(fpath, 'w', encoding='utf-8') as fp:
+                        fp.write(f['content'] or '')
+            cursor.close(); conn.close()
+
         proc = subprocess.run(
             command, shell=True,
             capture_output=True, text=True,
             timeout=30, env=env,
-            cwd='/tmp'  # safe working directory
+            cwd=work_dir
         )
         return jsonify({'output': proc.stdout, 'error': proc.stderr, 'exit_code': proc.returncode})
+
     except subprocess.TimeoutExpired:
         return jsonify({'output': '', 'error': 'Command timed out (30s limit)', 'exit_code': 1})
     except Exception as e:
         return jsonify({'output': '', 'error': str(e), 'exit_code': 1})
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 # ─── CODE EXECUTION ──────────────────────────────────────────
 LANG_CONFIG = {
@@ -413,6 +434,8 @@ LANG_CONFIG = {
     'javascript': {'file_cmd': ['node',   '{file}'],    'ext': '.js'},
     'go':         {'file_cmd': ['go', 'run', '{file}'], 'ext': '.go'},
     'bash':       {'file_cmd': ['bash',   '{file}'],    'ext': '.sh'},
+    'php':        {'file_cmd': ['php',    '{file}'],    'ext': '.php'},
+    'ruby':       {'file_cmd': ['ruby',   '{file}'],    'ext': '.rb'},
     'java': {
         'ext': '.java',
         'compile': ['javac', '{file}'],
@@ -433,9 +456,6 @@ LANG_CONFIG = {
         'compile': ['rustc', '{file}', '-o', '{exe}'],
         'run':     ['{exe}']
     },
-    'typescript': {'file_cmd': ['ts-node', '{file}'], 'ext': '.ts'},
-    'php':        {'file_cmd': ['php',     '{file}'], 'ext': '.php'},
-    'ruby':       {'file_cmd': ['ruby',    '{file}'], 'ext': '.rb'},
 }
 
 @app.route('/api/run', methods=['POST'])
@@ -501,7 +521,6 @@ def lang_versions():
         'c':          ['gcc',     '--version'],
         'go':         ['go',      'version'],
         'rust':       ['rustc',   '--version'],
-        'typescript': ['ts-node', '--version'],
         'php':        ['php',     '--version'],
         'ruby':       ['ruby',    '--version'],
         'bash':       ['bash',    '--version'],
