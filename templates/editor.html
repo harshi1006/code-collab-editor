@@ -459,7 +459,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/go/go.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/rust/rust.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
@@ -484,20 +484,19 @@ const EXT_TO_LANG = {
   py:'python', js:'javascript', java:'java',
   cpp:'cpp', c:'c', go:'go', rs:'rust',
   sh:'bash', php:'php', rb:'ruby',
-  // view-only (no execution)
-  html:'html', css:'css', sql:'sql'
+  html:'html', css:'css'
 };
 const LANG_ICONS = {
   python:'🐍', javascript:'🟨', java:'☕',
   cpp:'⚙️', c:'🔧', go:'🐹', rust:'🦀',
   bash:'🖥️', php:'🐘', ruby:'💎',
-  html:'🌐', css:'🎨', sql:'🗄️'
+  html:'🌐', css:'🎨'
 };
 const CM_MODES = {
   python:'python', javascript:'javascript',
   java:'text/x-java', cpp:'text/x-c++src', c:'text/x-csrc',
   go:'go', rust:'rust', bash:'shell',
-  html:'htmlmixed', css:'css', sql:'sql'
+  html:'htmlmixed', css:'css'
 };
 
 function getLangFromFile(filename) {
@@ -749,19 +748,6 @@ function runCode() {
     return;
   }
 
-  // ── SQL — helpful message
-  if (lang === 'sql') {
-    switchPanel('output');
-    document.getElementById('pbOutput').innerHTML =
-      '<pre class="output-pre idle">ℹ SQL cannot be executed here directly.\n\n' +
-      'Options to run SQL:\n' +
-      '  • Use MySQL Workbench or DBeaver\n' +
-      '  • Run via terminal: mysql -u root -p < query.sql\n' +
-      '  • Use an online tool: sqliteonline.com or db-fiddle.com\n\n' +
-      'You can write and save your SQL here, then run it in your preferred client.</pre>';
-    return;
-  }
-
   // ── All other languages — normal execution
   saveCurrentFile();
   const btn = document.getElementById('runBtn');
@@ -967,10 +953,8 @@ const LANG_OPTIONS = [
   { lang:'go',         icon:'🐹', ext:'.go',   name:'Go'      },
   { lang:'rust',       icon:'🦀', ext:'.rs',   name:'Rust'    },
   { lang:'bash',       icon:'🖥️', ext:'.sh',   name:'Bash'    },
-  // Below: no execution, file creation only
   { lang:'html',       icon:'🌐', ext:'.html', name:'HTML'    },
   { lang:'css',        icon:'🎨', ext:'.css',  name:'CSS'     },
-  { lang:'sql',        icon:'🗄️', ext:'.sql',  name:'SQL'     },
 ];
 
 const LANG_STARTERS = {
@@ -986,7 +970,6 @@ const LANG_STARTERS = {
   ruby:       'puts "Hello, World!"\n',
   html:       '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8"/>\n  <title>My Page</title>\n</head>\n<body>\n  <h1>Hello, World!</h1>\n</body>\n</html>\n',
   css:        '/* styles.css */\nbody {\n  margin: 0;\n  font-family: sans-serif;\n  background: #f0f0f0;\n}\n',
-  sql:        '-- query.sql\nSELECT "Hello, World!" AS message;\n',
 };
 
 let selectedLang = 'python';
