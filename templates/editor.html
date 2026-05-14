@@ -298,12 +298,13 @@
       <textarea id="codeEditor">{{ files[0].content if files else '' }}</textarea>
     </div>
 
-    <!-- Bottom panel: Output / Stdin / Terminal -->
+    <!-- Bottom panel: Output / Stdin / Terminal / Preview -->
     <div class="bottom-panel" id="bottomPanel">
       <div class="panel-tabs">
-        <span class="panel-tab active" id="ptOutput"   onclick="switchPanel('output')">  Output</span>
-        <span class="panel-tab"        id="ptStdin"    onclick="switchPanel('stdin')">   Stdin</span>
+        <span class="panel-tab active" id="ptOutput"   onclick="switchPanel('output')">Output</span>
+        <span class="panel-tab"        id="ptStdin"    onclick="switchPanel('stdin')">Stdin</span>
         <span class="panel-tab"        id="ptTerminal" onclick="switchPanel('terminal')"><i class="fa fa-terminal me-1"></i>Terminal</span>
+        <span class="panel-tab"        id="ptPreview"  onclick="switchPanel('preview')" style="display:none;"><i class="fa fa-eye me-1"></i>Preview</span>
         <div class="panel-tab-extra">
           <span id="exitBadge" style="display:none;font-family:'JetBrains Mono',monospace;font-size:.62rem;"></span>
           <span style="font-size:.65rem;color:var(--muted);font-family:'JetBrains Mono',monospace;cursor:ns-resize;" title="Drag to resize panel">⇕</span>
@@ -324,8 +325,16 @@
       <div id="termInputRow" class="term-input-row" style="display:none;">
         <span class="term-prompt-static">$</span>
         <input type="text" class="term-input" id="termInput"
-               placeholder="Type a command... (e.g. python main.py, git init, pip install requests)"
+               placeholder="Type a command... (e.g. python main.py, git init)"
                onkeydown="handleTermInput(event)"/>
+      </div>
+
+      <!-- HTML/CSS Preview -->
+      <div class="panel-body" id="pbPreview" style="padding:0;overflow:hidden;">
+        <iframe id="previewFrame"
+                style="width:100%;height:100%;border:none;background:#fff;"
+                sandbox="allow-scripts allow-same-origin">
+        </iframe>
       </div>
     </div>
   </div>
@@ -472,17 +481,23 @@ let activeFile = {{ (files[0].filename if files else '') | tojson }};
 const LANG_VERSIONS = {}; // filled by API
 
 const EXT_TO_LANG = {
-  py:'python', js:'javascript', ts:'typescript', java:'java',
-  cpp:'cpp', c:'c', html:'html', css:'css', sql:'sql', go:'go', rs:'rust'
+  py:'python', js:'javascript', java:'java',
+  cpp:'cpp', c:'c', go:'go', rs:'rust',
+  sh:'bash', php:'php', rb:'ruby',
+  // view-only (no execution)
+  html:'html', css:'css', sql:'sql'
 };
 const LANG_ICONS = {
-  python:'🐍', javascript:'🟨', typescript:'🔷', java:'☕',
-  cpp:'⚙️', c:'🔧', html:'🌐', css:'🎨', sql:'🗄️', go:'🐹', rust:'🦀'
+  python:'🐍', javascript:'🟨', java:'☕',
+  cpp:'⚙️', c:'🔧', go:'🐹', rust:'🦀',
+  bash:'🖥️', php:'🐘', ruby:'💎',
+  html:'🌐', css:'🎨', sql:'🗄️'
 };
 const CM_MODES = {
-  python:'python', javascript:'javascript', typescript:'javascript',
+  python:'python', javascript:'javascript',
   java:'text/x-java', cpp:'text/x-c++src', c:'text/x-csrc',
-  html:'htmlmixed', css:'css', sql:'sql', go:'go', rust:'rust'
+  go:'go', rust:'rust', bash:'shell',
+  html:'htmlmixed', css:'css', sql:'sql'
 };
 
 function getLangFromFile(filename) {
@@ -554,6 +569,20 @@ function switchFile(filename, el) {
   remoteChange = false;
   updateLangChip(filename);
   clearOutput();
+
+  // Update Run button label based on file type
+  const lang = getLangFromFile(filename);
+  const runBtn = document.getElementById('runBtn');
+  if (lang === 'html' || lang === 'css') {
+    runBtn.innerHTML = '<i class="fa fa-eye"></i> Preview';
+    document.getElementById('ptPreview').style.display = 'inline';
+  } else {
+    runBtn.innerHTML = '<i class="fa fa-play"></i> Run';
+    document.getElementById('ptPreview').style.display = 'none';
+    // Switch away from preview if active
+    const activeTab = document.querySelector('.panel-tab.active');
+    if (activeTab && activeTab.id === 'ptPreview') switchPanel('output');
+  }
 }
 
 function clearOutput() {
@@ -649,18 +678,96 @@ document.addEventListener('keydown', e => {
 function runCode() {
   const lang = getLangFromFile(activeFile);
 
-  // Languages that cannot be executed
-  const NO_EXEC = ['html', 'css', 'sql'];
-  if (NO_EXEC.includes(lang)) {
-    switchPanel('output');
-    document.getElementById('pbOutput').innerHTML =
-      '<pre class="output-pre idle">ℹ ' + lang.toUpperCase() + ' files cannot be executed directly.\nOpen HTML files in a browser, or use a SQL client for SQL files.</pre>';
+  // ── HTML — live preview with auto CSS/JS injection
+  if (lang === 'html') {
+    let html = editor.getValue();
+
+    // Collect all CSS files from room and inject
+    const cssFiles = Object.keys(fileContents).filter(f => f.endsWith('.css'));
+    if (cssFiles.length > 0) {
+      const allCss = cssFiles.map(f => `/* ${f} */\n${fileContents[f]}`).join('\n\n');
+      const styleTag = `<style>\n${allCss}\n</style>`;
+      // Inject before </head> if exists, else prepend
+      html = html.includes('</head>')
+        ? html.replace('</head>', styleTag + '\n</head>')
+        : styleTag + '\n' + html;
+    }
+
+    // Collect all JS files from room and inject
+    const jsFiles = Object.keys(fileContents).filter(f => f.endsWith('.js'));
+    if (jsFiles.length > 0) {
+      const allJs = jsFiles.map(f => `/* ${f} */\n${fileContents[f]}`).join('\n\n');
+      const scriptTag = `<script>\n${allJs}\n<\/script>`;
+      // Inject before </body> if exists, else append
+      html = html.includes('</body>')
+        ? html.replace('</body>', scriptTag + '\n</body>')
+        : html + '\n' + scriptTag;
+    }
+
+    const frame = document.getElementById('previewFrame');
+    document.getElementById('ptPreview').style.display = 'inline';
+    switchPanel('preview');
+    document.getElementById('runBtn').innerHTML = '<i class="fa fa-eye"></i> Preview';
+    setTimeout(() => document.getElementById('runBtn').innerHTML = '<i class="fa fa-play"></i> Run', 800);
+    frame.srcdoc = html;
     return;
   }
 
+  // ── CSS — wrap in HTML with any existing HTML file, inject CSS
+  if (lang === 'css') {
+    const css      = editor.getValue();
+    const htmlFile = Object.keys(fileContents).find(f => f.endsWith('.html'));
+    let baseHtml   = htmlFile ? fileContents[htmlFile] : `<!DOCTYPE html>
+<html><head><title>CSS Preview</title></head>
+<body>
+  <h1>Heading 1</h1><h2>Heading 2</h2>
+  <p>This is a paragraph with <strong>bold</strong> and <em>italic</em> text.</p>
+  <button>Button</button>
+  <ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>
+  <a href="#">A link</a>
+</body></html>`;
+
+    // If using existing HTML, also inject other CSS files
+    if (htmlFile) {
+      const otherCss = Object.keys(fileContents)
+        .filter(f => f.endsWith('.css') && f !== activeFile)
+        .map(f => fileContents[f]).join('\n');
+      const allCss = otherCss + '\n/* ' + activeFile + ' (current) */\n' + css;
+      baseHtml = baseHtml.includes('</head>')
+        ? baseHtml.replace('</head>', `<style>${allCss}</style></head>`)
+        : `<style>${allCss}</style>` + baseHtml;
+    } else {
+      baseHtml = baseHtml.replace('</head>', `<style>${css}</style></head>`);
+    }
+
+    const frame = document.getElementById('previewFrame');
+    document.getElementById('ptPreview').style.display = 'inline';
+    switchPanel('preview');
+    document.getElementById('runBtn').innerHTML = '<i class="fa fa-eye"></i> Preview';
+    setTimeout(() => document.getElementById('runBtn').innerHTML = '<i class="fa fa-play"></i> Run', 800);
+    frame.srcdoc = baseHtml;
+    return;
+  }
+
+  // ── SQL — helpful message
+  if (lang === 'sql') {
+    switchPanel('output');
+    document.getElementById('pbOutput').innerHTML =
+      '<pre class="output-pre idle">ℹ SQL cannot be executed here directly.\n\n' +
+      'Options to run SQL:\n' +
+      '  • Use MySQL Workbench or DBeaver\n' +
+      '  • Run via terminal: mysql -u root -p < query.sql\n' +
+      '  • Use an online tool: sqliteonline.com or db-fiddle.com\n\n' +
+      'You can write and save your SQL here, then run it in your preferred client.</pre>';
+    return;
+  }
+
+  // ── All other languages — normal execution
   saveCurrentFile();
   const btn = document.getElementById('runBtn');
   const out = document.getElementById('pbOutput');
+  // Hide preview tab for non-HTML files
+  document.getElementById('ptPreview').style.display = 'none';
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Running...';
   out.innerHTML = `<pre class="output-pre idle">Running ${activeFile}...</pre>`;
@@ -732,14 +839,16 @@ function runCode() {
 
 // ── Panel switching ─────────────────────────────────────────
 function switchPanel(panel) {
-  ['output','stdin','terminal'].forEach(p => {
-    document.getElementById('pt' + p.charAt(0).toUpperCase() + p.slice(1)).classList.toggle('active', p===panel);
+  ['output','stdin','terminal','preview'].forEach(p => {
+    const tab = document.getElementById('pt' + p.charAt(0).toUpperCase() + p.slice(1));
+    if (tab) tab.classList.toggle('active', p === panel);
   });
-  document.getElementById('pbOutput').classList.toggle('show',    panel==='output');
-  document.getElementById('pbStdin').classList.toggle('show',     panel==='stdin');
-  document.getElementById('pbTerminal').classList.toggle('show',  panel==='terminal');
-  document.getElementById('termInputRow').style.display = panel==='terminal' ? 'flex' : 'none';
-  if (panel==='terminal') document.getElementById('termInput').focus();
+  document.getElementById('pbOutput').classList.toggle('show',   panel === 'output');
+  document.getElementById('pbStdin').classList.toggle('show',    panel === 'stdin');
+  document.getElementById('pbTerminal').classList.toggle('show', panel === 'terminal');
+  document.getElementById('pbPreview').classList.toggle('show',  panel === 'preview');
+  document.getElementById('termInputRow').style.display = panel === 'terminal' ? 'flex' : 'none';
+  if (panel === 'terminal') document.getElementById('termInput').focus();
 }
 
 // ── Terminal ────────────────────────────────────────────────
@@ -784,7 +893,7 @@ function runTermCommand(cmd) {
 
   fetch('/api/terminal', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ command: cmd })
+    body: JSON.stringify({ command: cmd, room_code: ROOM_CODE })
   }).then(r=>r.json()).then(data => {
     const loader = document.getElementById(loadId);
     if (loader) loader.remove();
@@ -847,19 +956,18 @@ function shareVia(platform) {
 // ── File tree helpers ───────────────────────────────────────
 
 // Languages supported in backend LANG_CONFIG only
-const SUPPORTED_LANGS = ['python','javascript','typescript','java','cpp','c','go','rust','bash','php','ruby'];
+const SUPPORTED_LANGS = ['python','javascript','java','cpp','c','go','rust','bash','php','ruby'];
 
 const LANG_OPTIONS = [
   { lang:'python',     icon:'🐍', ext:'.py',   name:'Python'  },
   { lang:'javascript', icon:'🟨', ext:'.js',   name:'JS'      },
-  { lang:'typescript', icon:'🔷', ext:'.ts',   name:'TS'      },
   { lang:'java',       icon:'☕', ext:'.java', name:'Java'    },
   { lang:'cpp',        icon:'⚙️', ext:'.cpp',  name:'C++'     },
   { lang:'c',          icon:'🔧', ext:'.c',    name:'C'       },
   { lang:'go',         icon:'🐹', ext:'.go',   name:'Go'      },
   { lang:'rust',       icon:'🦀', ext:'.rs',   name:'Rust'    },
   { lang:'bash',       icon:'🖥️', ext:'.sh',   name:'Bash'    },
-  // html/css/sql — no execution support, still can create files
+  // Below: no execution, file creation only
   { lang:'html',       icon:'🌐', ext:'.html', name:'HTML'    },
   { lang:'css',        icon:'🎨', ext:'.css',  name:'CSS'     },
   { lang:'sql',        icon:'🗄️', ext:'.sql',  name:'SQL'     },
@@ -868,16 +976,17 @@ const LANG_OPTIONS = [
 const LANG_STARTERS = {
   python:     '# main.py\nprint("Hello, World!")\n',
   javascript: '// main.js\nconsole.log("Hello, World!");\n',
-  typescript: '// main.ts\nconst msg: string = "Hello, World!";\nconsole.log(msg);\n',
   java:       'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}\n',
   cpp:        '#include<iostream>\nusing namespace std;\nint main(){\n    cout<<"Hello, World!"<<endl;\n    return 0;\n}\n',
   c:          '#include<stdio.h>\nint main(){\n    printf("Hello, World!\\n");\n    return 0;\n}\n',
   go:         'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello, World!")\n}\n',
   rust:       'fn main() {\n    println!("Hello, World!");\n}\n',
+  bash:       '#!/bin/bash\necho "Hello, World!"\n',
+  php:        '<?php\necho "Hello, World!\\n";\n',
+  ruby:       'puts "Hello, World!"\n',
   html:       '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8"/>\n  <title>My Page</title>\n</head>\n<body>\n  <h1>Hello, World!</h1>\n</body>\n</html>\n',
   css:        '/* styles.css */\nbody {\n  margin: 0;\n  font-family: sans-serif;\n  background: #f0f0f0;\n}\n',
   sql:        '-- query.sql\nSELECT "Hello, World!" AS message;\n',
-  bash:       '#!/bin/bash\necho "Hello, World!"\n',
 };
 
 let selectedLang = 'python';
