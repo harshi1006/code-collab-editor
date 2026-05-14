@@ -26,9 +26,6 @@ RUN apt-get update && apt-get install -y \
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# ── TypeScript (ts-node) ─────────────────────────────────────
-RUN npm install -g ts-node typescript
-
 # ── Working directory ────────────────────────────────────────
 WORKDIR /app
 
