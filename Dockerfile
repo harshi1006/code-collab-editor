@@ -37,7 +37,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # ── Port ─────────────────────────────────────────────────────
-EXPOSE 5000
+EXPOSE 10000
 
 # ── Start with gunicorn (production WSGI server) ─────────────
-CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:10000", "--timeout", "120", "app:app"]
