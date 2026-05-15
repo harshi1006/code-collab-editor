@@ -768,8 +768,19 @@ function runCode() {
       stdin:    document.getElementById('stdinInput').value
     })
   })
-  .then(r => r.json())
+  .then(r => {
+    // Session expired — server returned HTML login page instead of JSON
+    if (r.redirected || r.headers.get('content-type')?.includes('text/html')) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa fa-play"></i> Run';
+      out.innerHTML = '<pre class="output-pre err">Session expired. Redirecting to login...</pre>';
+      setTimeout(() => window.location.href = '/login', 1500);
+      return null;
+    }
+    return r.json();
+  })
   .then(data => {
+    if (!data) return; // session expired case handled above
     btn.disabled = false;
     btn.innerHTML = '<i class="fa fa-play"></i> Run';
 
