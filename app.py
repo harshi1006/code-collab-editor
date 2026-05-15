@@ -435,29 +435,29 @@ def terminal_run():
 
 # ─── CODE EXECUTION ──────────────────────────────────────────
 LANG_CONFIG = {
-    'python':     {'file_cmd': ['python', '{file}'],    'ext': '.py'},
-    'javascript': {'file_cmd': ['node',   '{file}'],    'ext': '.js'},
-    'go':         {'file_cmd': ['go', 'run', '{file}'], 'ext': '.go'},
-    'bash':       {'file_cmd': ['bash',   '{file}'],    'ext': '.sh'},
-    'php':        {'file_cmd': ['php',    '{file}'],    'ext': '.php'},
-    'ruby':       {'file_cmd': ['ruby',   '{file}'],    'ext': '.rb'},
+    'python':     {'file_cmd': ['python', '{file}'],                'ext': '.py',   'timeout': 10},
+    'javascript': {'file_cmd': ['node',   '{file}'],                'ext': '.js',   'timeout': 10},
+    'go':         {'file_cmd': ['go', 'run', '{file}'],             'ext': '.go',   'timeout': 30},
+    'bash':       {'file_cmd': ['bash',   '{file}'],                'ext': '.sh',   'timeout': 10},
+    'php':        {'file_cmd': ['php',    '{file}'],                'ext': '.php',  'timeout': 10},
+    'ruby':       {'file_cmd': ['ruby',   '{file}'],                'ext': '.rb',   'timeout': 10},
     'java': {
-        'ext': '.java',
+        'ext': '.java', 'timeout': 30,
         'compile': ['javac', '{file}'],
         'run':     ['java', '-cp', '{dir}', 'Main']
     },
     'cpp': {
-        'ext': '.cpp',
+        'ext': '.cpp', 'timeout': 30,
         'compile': ['g++', '{file}', '-o', '{exe}'],
         'run':     ['{exe}']
     },
     'c': {
-        'ext': '.c',
+        'ext': '.c', 'timeout': 30,
         'compile': ['gcc', '{file}', '-o', '{exe}'],
         'run':     ['{exe}']
     },
     'rust': {
-        'ext': '.rs',
+        'ext': '.rs', 'timeout': 60,
         'compile': ['rustc', '{file}', '-o', '{exe}'],
         'run':     ['{exe}']
     },
@@ -471,30 +471,35 @@ def run_code():
     code     = data.get('code', '')
     language = data.get('language', 'python')
     stdin    = data.get('stdin', '')
-    cfg = LANG_CONFIG.get(language)
+    cfg     = LANG_CONFIG.get(language)
     if not cfg:
         return jsonify({'output': '', 'error': f'"{language}" supported nahi hai.', 'exit_code': 1})
-    tmp_dir = tempfile.mkdtemp()
+
+    timeout  = cfg.get('timeout', 10)
+    tmp_dir  = tempfile.mkdtemp()
     try:
         ext      = cfg['ext']
         fname    = 'Main' + ext if language == 'java' else 'code' + ext
         filepath = os.path.join(tmp_dir, fname)
         exe_path = os.path.join(tmp_dir, 'code_out')
+
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(code)
+
         if 'compile' in cfg:
             compile_cmd = [
                 c.replace('{file}', filepath).replace('{exe}', exe_path).replace('{dir}', tmp_dir)
                 for c in cfg['compile']
             ]
-            comp = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=20)
+            comp = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=60)
             if comp.returncode != 0:
                 return jsonify({'output': '', 'error': comp.stderr or comp.stdout or 'Compilation failed',
                                 'exit_code': comp.returncode})
             run_cmd = [c.replace('{exe}', exe_path).replace('{dir}', tmp_dir) for c in cfg['run']]
         else:
             run_cmd = [c.replace('{file}', filepath) for c in cfg['file_cmd']]
-        proc = subprocess.run(run_cmd, input=stdin, capture_output=True, text=True, timeout=10)
+
+        proc = subprocess.run(run_cmd, input=stdin, capture_output=True, text=True, timeout=timeout)
         stdout_val = proc.stdout or ''
         stderr_val = proc.stderr or ''
         exit_code  = proc.returncode
@@ -507,7 +512,7 @@ def run_code():
                 exit_code = 1
         return jsonify({'output': stdout_val, 'error': stderr_val, 'exit_code': exit_code})
     except subprocess.TimeoutExpired:
-        return jsonify({'output': '', 'error': 'Execution timed out (10s)', 'exit_code': 1})
+        return jsonify({'output': '', 'error': f'Execution timed out ({timeout}s limit)', 'exit_code': 1})
     except FileNotFoundError as e:
         return jsonify({'output': '', 'error': f'{language} runtime not found.\n{e}', 'exit_code': 1})
     except Exception as e:
