@@ -13,7 +13,7 @@ from datetime import datetime
 import secrets
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.secret_key = os.environ.get('SECRET_KEY', 'codesync-dev-key-change-in-production')
 
 # ─── DB CONFIG ───────────────────────────────────────────────
 DB_CONFIG = {
@@ -21,8 +21,13 @@ DB_CONFIG = {
     'user':     os.environ.get('MYSQLUSER',     os.environ.get('MYSQL_USER',     'root')),
     'password': os.environ.get('MYSQLPASSWORD', os.environ.get('MYSQL_PASSWORD', 'root')),
     'database': os.environ.get('MYSQLDATABASE', os.environ.get('MYSQL_DATABASE', 'collab_editor')),
-    'port':     int(os.environ.get('MYSQLPORT', os.environ.get('MYSQL_PORT', 3306))),
+    'port':     int(os.environ.get('MYSQLPORT',  os.environ.get('MYSQL_PORT',    3306))),
 }
+
+# Aiven MySQL requires SSL — add if env var is set
+if os.environ.get('MYSQL_SSL', 'false').lower() == 'true':
+    DB_CONFIG['ssl_disabled'] = False
+    DB_CONFIG['ssl_ca']       = os.environ.get('MYSQL_SSL_CA', '')
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
@@ -461,7 +466,7 @@ LANG_CONFIG = {
 @app.route('/api/run', methods=['POST'])
 def run_code():
     if 'user_id' not in session:
-        return jsonify({'error': 'unauthorized'}), 401
+        return jsonify({'error': 'Session expired. Please login again.', 'output': '', 'exit_code': 401}), 401
     data     = request.json
     code     = data.get('code', '')
     language = data.get('language', 'python')
