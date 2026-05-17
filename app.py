@@ -435,12 +435,14 @@ def terminal_run():
 
 # ─── CODE EXECUTION ──────────────────────────────────────────
 LANG_CONFIG = {
-    'python':     {'file_cmd': ['python', '{file}'],                'ext': '.py',   'timeout': 10},
-    'javascript': {'file_cmd': ['node',   '{file}'],                'ext': '.js',   'timeout': 10},
-    'go':         {'file_cmd': ['go', 'run', '{file}'],             'ext': '.go',   'timeout': 30},
-    'bash':       {'file_cmd': ['bash',   '{file}'],                'ext': '.sh',   'timeout': 10},
-    'php':        {'file_cmd': ['php',    '{file}'],                'ext': '.php',  'timeout': 10},
-    'ruby':       {'file_cmd': ['ruby',   '{file}'],                'ext': '.rb',   'timeout': 10},
+    'python':     {'file_cmd': ['python', '{file}'],    'ext': '.py',   'timeout': 10},
+    'javascript': {'file_cmd': ['node',   '{file}'],    'ext': '.js',   'timeout': 10},
+    'bash':       {'file_cmd': ['bash',   '{file}'],    'ext': '.sh',   'timeout': 10},
+    'php':        {'file_cmd': ['php',    '{file}'],    'ext': '.php',  'timeout': 10},
+    'ruby':       {'file_cmd': ['ruby',   '{file}'],    'ext': '.rb',   'timeout': 10},
+    'go':         {'ext': '.go', 'timeout': 60,
+                   'compile': ['go', 'build', '-o', '{exe}', '{file}'],
+                   'run':     ['{exe}']},
     'java': {
         'ext': '.java', 'timeout': 30,
         'compile': ['javac', '{file}'],
@@ -485,6 +487,29 @@ def run_code():
 
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(code)
+
+        # Go needs a module environment to run properly
+        if language == 'go':
+            env = os.environ.copy()
+            env['PATH'] = '/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + env.get('PATH', '')
+            env['GOPATH']  = '/tmp/gopath'
+            env['GOCACHE'] = '/tmp/gocache'
+            # Initialize go module
+            subprocess.run(['go', 'mod', 'init', 'codesync'], cwd=tmp_dir,
+                         capture_output=True, text=True, timeout=30, env=env)
+            proc = subprocess.run(
+                ['go', 'run', fname], input=stdin,
+                capture_output=True, text=True,
+                timeout=timeout, env=env, cwd=tmp_dir
+            )
+            stdout_val = proc.stdout or ''
+            stderr_val = proc.stderr or ''
+            exit_code  = proc.returncode
+            if exit_code == 0 and stderr_val:
+                lower = stderr_val.lower()
+                if any(kw in lower for kw in ['error', 'undefined', 'cannot', 'invalid']):
+                    exit_code = 1
+            return jsonify({'output': stdout_val, 'error': stderr_val, 'exit_code': exit_code})
 
         if 'compile' in cfg:
             compile_cmd = [
