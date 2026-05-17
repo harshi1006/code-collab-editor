@@ -488,19 +488,35 @@ def run_code():
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(code)
 
-        # Go needs a module environment to run properly
+        # Go needs module environment + build approach (go run too slow in Docker)
         if language == 'go':
             env = os.environ.copy()
-            env['PATH'] = '/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + env.get('PATH', '')
+            env['PATH']    = '/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + env.get('PATH', '')
             env['GOPATH']  = '/tmp/gopath'
             env['GOCACHE'] = '/tmp/gocache'
-            # Initialize go module
-            subprocess.run(['go', 'mod', 'init', 'codesync'], cwd=tmp_dir,
-                         capture_output=True, text=True, timeout=30, env=env)
+            env['GOFLAGS'] = '-mod=mod'
+
+            # Initialize module
+            subprocess.run(['go', 'mod', 'init', 'codesync'],
+                           cwd=tmp_dir, capture_output=True, text=True, timeout=10, env=env)
+
+            # Build binary first
+            exe = os.path.join(tmp_dir, 'go_out')
+            build = subprocess.run(
+                ['go', 'build', '-o', exe, fname],
+                cwd=tmp_dir, capture_output=True, text=True, timeout=60, env=env
+            )
+            if build.returncode != 0:
+                return jsonify({
+                    'output':    '',
+                    'error':     build.stderr or build.stdout or 'Go build failed',
+                    'exit_code': build.returncode
+                })
+
+            # Run the binary — fast now
             proc = subprocess.run(
-                ['go', 'run', fname], input=stdin,
-                capture_output=True, text=True,
-                timeout=timeout, env=env, cwd=tmp_dir
+                [exe], input=stdin,
+                capture_output=True, text=True, timeout=10, env=env
             )
             stdout_val = proc.stdout or ''
             stderr_val = proc.stderr or ''
